@@ -1,27 +1,30 @@
 import React, { useReducer, useState } from "react";
+import './App.css';
 import axios from "axios";
-import TextField from "@mui/material/TextField";
-import Button from "@mui/material/Button";
-import Snackbar from "@mui/material/Snackbar";
-import Alert from "@mui/material/Alert";
-import { Input, InputAdornment, InputLabel } from "@mui/material/";
-import RefreshIcon from '@mui/icons-material/Refresh';
-import IconButton from '@mui/material/IconButton';
+import {
+  TextField,
+  Button,
+  Snackbar,
+  Alert,
+  Input,
+  InputAdornment,
+  InputLabel,
+  IconButton,
+  CircularProgress,
+  Paper,
+  Typography,
+  FormControl,
+} from "@mui/material";
+import RefreshIcon from "@mui/icons-material/Refresh";
+
+import CreditCardIcon from "@mui/icons-material/CreditCard";
+import AssignmentIcon from "@mui/icons-material/Assignment";
 
 import PaymentReceipt from "./components/PaymentReceipt";
 
-import "./App.css";
+import api from './axiosConfig'
 
-const api = axios.create({
-  baseURL: "https://api.mercadopago.com",
-});
 
-api.interceptors.request.use(async (config) => {
-  const token = process.env.REACT_APP_TOKEN_MERCADO_PAGO
-  config.headers.Authorization = `Bearer ${token}`;
-
-  return config;
-});
 
 const formReducer = (state, event) => {
   return {
@@ -30,22 +33,25 @@ const formReducer = (state, event) => {
   };
 };
 
+// ... (importações)
+
 function App() {
   const [formData, setFormdata] = useReducer(formReducer, {});
-  const [responsePayment, setResponsePayment] = useState(false);
-  const [linkBuyMercadoPago, setLinkBuyMercadoPago] = useState(false);
+  const [responsePayment, setResponsePayment] = useState(null);
+  const [linkBuyMercadoPago, setLinkBuyMercadoPago] = useState(null);
   const [statusPayment, setStatusPayment] = useState(false);
   const [snackbarState, setSnackbarState] = useState({
     open: false,
     message: "",
     severity: "success",
   });
- 
+  const [loading, setLoading] = useState(false);
+  const [error, setError] = useState(null);
 
-  // Adicione um novo estado para armazenar o valor escolhido
-  const [chosenAmount, setChosenAmount] = useState(0.1); // Valor padrão inicial
+  const [chosenAmount, setChosenAmount] = useState(0.1);
 
   
+
 
   const handleChange = (event) => {
     setFormdata({
@@ -53,9 +59,8 @@ function App() {
       value: event.target.value,
     });
 
-    // Se o campo atual for o campo de valor, atualize o estado
     if (event.target.name === "amount") {
-      setChosenAmount(parseFloat(event.target.value) || 0); // Converte para float, ou assume 0 se não puder ser convertido
+      setChosenAmount(parseFloat(event.target.value) || 0);
     }
   };
 
@@ -72,13 +77,11 @@ function App() {
     return email && nome && cpf;
   };
 
-  // ... (código anterior)
-
-  const handleSubmit = (event) => {
+  const handleSubmit = async (event) => {
     event.preventDefault();
 
-    if (!validateForm()) {
-      showSnackbar("Preencha todos os campos antes de pagar.", "error");
+    if (!validateForm() || chosenAmount < 0.1) {
+      showSnackbar("Preencha todos os campos e escolha um valor válido.", "error");
       return;
     }
 
@@ -98,115 +101,126 @@ function App() {
       notification_url: "https://ruanfr.com",
     };
 
-    api
-      .post("v1/payments", body)
-      .then((response) => {
-        setResponsePayment(response);
-        setLinkBuyMercadoPago(
-          response.data.point_of_interaction.transaction_data.ticket_url
-        );
+    try {
+      setLoading(true);
+      setError(null);
+      const response = await api.post("v1/payments", body);
+      setResponsePayment(response);
+      setLinkBuyMercadoPago(
+        response.data.point_of_interaction.transaction_data.ticket_url
+      );
+      showSnackbar(
+        `Pagamento gerado com sucesso no valor de R$: ${chosenAmount}!`,
+        "success"
+      );
+    } catch (err) {
+      console.error(err);
+      setError("Erro ao processar pagamento. Tente novamente.");
+      showSnackbar("Erro ao processar pagamento. Tente novamente.", "error");
+    } finally {
+      setLoading(false);
+    }
+  };
+
+  const getStatusPayment = async () => {
+    try {
+      const response = await api.get(`v1/payments/${responsePayment.data.id}`);
+      if (response.data.status === "approved") {
+        setStatusPayment(true);
+        showSnackbar("Pagamento realizado com sucesso!", "success");
+      } else if (response.data.status === "pending") {
         showSnackbar(
-          `Pagamento gerado com sucesso no valor de R$: ${chosenAmount}!`,
-          "success"
+          "Aguardando pagamento. Por favor, aguarde.",
+          "info"
         );
-      })
-      .catch((err) => {
-        console.error(err);
-        showSnackbar("Erro ao processar pagamento. Tente novamente.", "error");
-      });
+      } else {
+        showSnackbar("Pagamento não foi aprovado.", "warning");
+      }
+    } catch (err) {
+      console.error(err);
+      showSnackbar(
+        "Erro ao obter status do pagamento. Tente novamente.",
+        "error"
+      );
+    }
   };
-
-  // ... (código anterior)
-
-  const getStatusPayment = () => {
-    api.get(`v1/payments/${responsePayment.data.id}`)
-      .then((response) => {
-        if (response.data.status === "approved") {
-          console.log(response)
-          setStatusPayment(true);
-          showSnackbar("Pagamento realizado com sucesso!", "success");
-        } else if (response.data.status === "pending") {
-          showSnackbar("Aguardando pagamento. Por favor, aguarde.", "info");
-        } else {
-          showSnackbar("Pagamento não foi aprovado.", "warning");
-        }
-      })
-      .catch((err) => {
-        console.error(err);
-        showSnackbar("Erro ao obter status do pagamento. Tente novamente.", "error");
-      });
-  };
-  
 
   return (
     <div className="App">
-      <header className="App-header">
-        <h1>PIX com API do Mercado Pago</h1>
-
+      <Paper elevation={3} style={{ padding: "20px", maxWidth: "600px", margin: "auto", marginTop: '2rem' }}>
+        <Typography className="title" variant="h5">Checkout de pagamento PIX</Typography>
         {!responsePayment && (
-          <form onSubmit={handleSubmit}>
-            <div className="input">
+          <form onSubmit={handleSubmit} style={{ marginTop: "20px" }}>
+            <FormControl fullWidth margin="normal">
               <TextField
                 label="E-mail"
-                variant="standard"
+                variant="outlined"
                 onChange={handleChange}
                 name="email"
-                style={{ width: "350px" }}
+                fullWidth
               />
-            </div>
-            <div className="input">
+            </FormControl>
+            <FormControl fullWidth margin="normal">
               <TextField
                 label="Nome"
-                variant="standard"
+                variant="outlined"
                 onChange={handleChange}
                 name="nome"
-                style={{ width: "350px" }}
+                fullWidth
               />
-            </div>
-            <div className="input">
+            </FormControl>
+            <FormControl fullWidth margin="normal">
               <TextField
                 label="CPF"
-                variant="standard"
+                variant="outlined"
                 onChange={handleChange}
                 name="cpf"
-                style={{ width: "350px" }}
+                fullWidth
               />
-            </div>
-            <div className="input">
+            </FormControl>
+            <FormControl fullWidth margin="normal">
               <InputLabel htmlFor="standard-adornment-amount">
                 Digite um valor
               </InputLabel>
               <Input
                 id="standard-adornment-amount"
-                startAdornment={
-                  <InputAdornment position="start">$</InputAdornment>
-                }
+                startAdornment={<InputAdornment position="start">$</InputAdornment>}
                 label="Valor"
                 variant="outlined"
                 onChange={handleChange}
                 name="amount"
                 type="number"
-                style={{ width: "350px" }}
-              />
-            </div>
-
-            <div className="button">
-              <Button
-                type="submit"
-                variant="contained"
-                color="primary"
-                disabled={!validateForm()}
                 fullWidth
-              >
-                Pagar
-              </Button>
-            </div>
+              />
+            </FormControl>
+            <Button
+              type="submit"
+              variant="contained"
+              color="primary"
+              disabled={!validateForm() || loading}
+              fullWidth
+              style={{ marginTop: "20px" }}
+            >
+              {loading ? <CircularProgress size={24} /> : "Pagar"}
+            </Button>
+            {error && (
+              <Typography variant="body2" color="error" style={{ marginTop: "10px" }}>
+                {error}
+              </Typography>
+            )}
           </form>
         )}
 
-        {/* Botão para verificar status com ícone */}
+        {/* footer */}
+        <p style={{marginTop: '2rem', textAlign: 'center'}}>Feito com ❤️ por Ruan Freire</p>
+
         {responsePayment && (
-          <IconButton onClick={getStatusPayment} color="primary" aria-label="Verificar status pagamento">
+          <IconButton
+            onClick={getStatusPayment}
+            color="primary"
+            aria-label="Verificar status pagamento"
+            style={{ marginTop: "20px" }}
+          >
             <RefreshIcon />
           </IconButton>
         )}
@@ -215,15 +229,21 @@ function App() {
           <iframe
             src={linkBuyMercadoPago}
             width="100%"
-            height="700px"
+            height="400px"
             title="link_buy"
+            style={{ marginTop: "20px" }}
           />
         )}
 
- {/* Renderiza o comprovante após o pagamento ser aprovado */}
- {statusPayment && (
-        <PaymentReceipt paymentData={responsePayment.data} />
-      )}
+        {statusPayment && (
+          <div>
+            <PaymentReceipt paymentData={responsePayment.data} />
+            <Typography variant="body1" style={{ marginTop: "10px" }}>
+              Compra concluída com sucesso!
+            </Typography>
+          </div>
+        )}
+
         <Snackbar
           open={snackbarState.open}
           autoHideDuration={6000}
@@ -236,8 +256,8 @@ function App() {
             {snackbarState.message}
           </Alert>
         </Snackbar>
-      </header>
-      </div>
+      </Paper>
+    </div>
   );
 }
 
